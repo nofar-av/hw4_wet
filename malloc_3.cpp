@@ -2,6 +2,15 @@
 #include <iostream>
 #include <cstring>
 
+void* Sbrk(size_t size)
+{
+    void* p = Sbrk(size);
+    if (p == (void*)(-1))
+    {
+        return nullptr;
+    }
+    return p;
+}
 typedef struct  malloc_meta_data_t{
     size_t size;
     bool is_free;
@@ -67,11 +76,8 @@ public:
     MallocMetadata* unionWilderness(size_t size)
     {
         size_t new_space = size - this->wilderness->size;
-        void* p = sbrk(new_space);
-        if (p == (void*)(-1))
-        {
-            return nullptr;
-        }
+        void* p = Sbrk(new_space);
+
         this->wilderness->size = size;
         this->alloc_bytes+= new_space;
         return this->wilderness;
@@ -119,10 +125,11 @@ public:
             {
                 return nullptr;
             }
+            MallocMetadata* meta_ret = unionWilderness(size);
             this->wilderness->is_free = false;
             this->free_blocks --;
             this->free_bytes -= this->wilderness->size;
-            return unionWilderness(size);
+            return meta_ret;
         }
         else
         {
