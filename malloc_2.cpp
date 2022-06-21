@@ -70,7 +70,7 @@ public:
             return nullptr;
         }
         MallocMetadata* tmp = this->list_head;
-        while (tmp != nullptr && tmp->size < size && tmp->is_free )
+        while (tmp != nullptr && (tmp->size < size || !tmp->is_free ))
         {
             tmp = tmp->next;
         }
