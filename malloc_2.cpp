@@ -167,7 +167,7 @@ size_t _num_allocated_bytes()
 size_t _size_meta_data()
 {
     //Returns the number of bytes of a single meta-data structure in your system.
-    return sizeof(MallocMetadata) -8;
+    return sizeof(MallocMetadata);
 }
 
 size_t _num_meta_data_bytes()
@@ -188,12 +188,7 @@ void* allocateBlock(size_t size)
     {
         return result;
     }
-    void * p = sbrk(size);
-    if (p == (void*)(-1))
-    {
-        return nullptr;
-    }
-    result = sbrk(sizeof(MallocMetadata));
+    result = sbrk(size + sizeof(MallocMetadata));
     if (result == (void*)(-1))
     {
         return nullptr;
@@ -203,7 +198,7 @@ void* allocateBlock(size_t size)
     meta_data->prev = nullptr;
     meta_data->is_free = false;
     meta_data->size = size;
-    meta_data->p = p;
+    meta_data->p = (void*)(result + sizeof(MallocMetadata));
     m_list.insertNewBlock(meta_data);
     return meta_data;
 }
