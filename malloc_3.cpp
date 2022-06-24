@@ -1,6 +1,8 @@
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
+#include <sys/mman.h>
+
 
 void* Sbrk(size_t size)
 {
@@ -30,7 +32,7 @@ class MallocList {
     size_t alloc_bytes; //free & used
     MallocMetadata* free_list_head;//  free list
     MallocMetadata* wilderness;// end of all blocks list
-
+    MallocMetadata* mmaped_list_head;
      
 public:
     MallocList()
@@ -41,11 +43,34 @@ public:
         this->alloc_bytes = 0;
         this->free_list_head = nullptr;
         this->wilderness = nullptr;
+        this->mmaped_list_head = nullptr;
     }
    /* ~MallocList ()//TODO::can we free a list? using what?
     {
         this->free_list_head->freeList();
     }*/
+    //update free_ pointers to null and is_free <- false
+    void updateBusyBlock(MallocMetadata* md)
+    {
+        if (md != nullptr)
+        {
+            md->is_free = false;
+            md->free_next = nullptr;
+            md->free_prev = nullptr;
+        }
+    }
+    //update all pointers to null and is_free <- false
+    void updateNewBlock(MallocMetadata* md)
+    {
+        if (md != nullptr) 
+        {
+            md->is_free = false;
+            md->lower = nullptr;
+            md->higher = nullptr;
+            md->free_next = nullptr;
+            md->free_prev = nullptr;
+        }
+    }
     static MallocList& getInstance() // make MallocList singleton
     {
         static MallocList instance; // Guaranteed to be destroyed.
@@ -73,15 +98,24 @@ public:
         }
         return new_md;
     }
+    void uniteFreeBlocksBlocks (MallocMetadata* low, MallocMetadata* high)
+    {
+        this->free_blocks--;
+        this->free_bytes += sizeof(MallocMetadata);
+        low->size += high->size + sizeof(MallocMetadata);
+        low->higher = high->higher;
+    }
     MallocMetadata* unionWilderness(size_t size)
     {
         size_t new_space = size - this->wilderness->size;
         void* p = Sbrk(new_space);
-
+        if (p == nullptr)
+        {
+            return nullptr;
+        }
         this->wilderness->size = size;
         this->alloc_bytes+= new_space;
         return this->wilderness;
-
     }
     // lower and  higher = null
     // free_next and free_prev = null, already allocated , is_free = false
@@ -100,8 +134,8 @@ public:
             MallocMetadata* tmp = this->wilderness;
             this->wilderness->higher = meta_data;
             meta_data->lower = this->wilderness;
-            meta_data->free_prev = (this->wilderness->is_free) ? 
-                this->wilderness : this->wilderness->free_prev;
+            //meta_data->free_prev = (this->wilderness->is_free) ? 
+              //  this->wilderness : this->wilderness->free_prev; what that is not free do not have valid free pointers
             this->wilderness = meta_data;
         }
         this->alloc_blocks ++;
@@ -120,20 +154,29 @@ public:
         }
         if (tmp == nullptr)
         {
-            //TODO:: return wilderness that is smaller than size
-            if(this->wilderness == nullptr)
+            //if there is no other free block return (if free) wilderness that is smaller than size
+            if (this->wilderness != nullptr && this->wilderness->is_free)
             {
+                MallocMetadata* meta_ret = unionWilderness(size);
+                if (meta_ret == nullptr)
+                {//sbrk failed
+                    return nullptr;
+                }
+                this->updateBusyBlock(this->wilderness); //updates free, free next & prev
+                this->free_blocks --;
+                this->free_bytes -= this->wilderness->size;
+                return meta_ret;
+            }
+            else 
+            {
+                //allocate a new block if there is no free block available
                 return nullptr;
             }
-            MallocMetadata* meta_ret = unionWilderness(size);
-            this->wilderness->is_free = false;
-            this->free_blocks --;
-            this->free_bytes -= this->wilderness->size;
-            return meta_ret;
         }
         else
         {
-            tmp->is_free = false;
+            //there is a block that is big enough
+            this->updateBusyBlock(tmp); //updates free, free next & prev
             this->free_blocks --;
             this->free_bytes -= tmp->size;
             if (tmp->size >= 128 +  _size_meta_data())
@@ -143,6 +186,7 @@ public:
             return (void*)tmp;
         }   
     }
+    //get allocated block by pointer
     MallocMetadata* getBlock (void* p)
     {
         if (p == nullptr)
@@ -160,25 +204,86 @@ public:
         }
         return tmp;
     }
+    void freeBigBlock(MallocMetadata* tmp)
+    {
+        if (tmp->lower != nullptr) 
+        {
+            tmp->lower->higher = tmp->higher;
+        }
+        if (tmp->upper != nullptr)
+        {
+            tmp->higher->lower = tmp->lower;
+        }
+        if (this->mmaped_list_head == tmp)
+        {
+            this->mmaped_list_head = nullptr;
+        }
+        this->alloc_bytes -= tmp->size;
+        this->alloc_blocks --;
+        munmap(tmp, sizeof(MallocMetadata) + tmp->size);
+    }
     void freeBlock (void * p)
     {
         if (p == nullptr)
         {
             return ;
         }
-        MallocMetadata* tmp = this->free_list_head;
+        MallocMetadata* tmp = this->wilderness;
         while (tmp != nullptr && tmp->p != p)
         {
-            tmp = tmp->next;
+            tmp = tmp->lower;
         }
         if (tmp == nullptr)
         {
             //TODO:: shouldnt happen
             return ;
         }
+        if (tmp->size >= 128*1024)
+        {
+            this->freeBigBlock(tmp);
+            return;
+        }
         tmp->is_free = true;
         this->free_blocks ++;
         this->free_bytes += tmp->size;
+        if (tmp->upper->is_free)
+        {
+            uniteFreeBlocks(tmp, tmp->upper);
+        }
+        if (tmp->lower->is_free)
+        {
+            uniteFreeBlocks(tmp->lower, tmp);
+        }
+        this->insertFreeBlock(tmp);
+    }
+    void insertFreeBlock(MallocMetadata* meta)
+    {
+        MallocMetadata* tmp = this->free_list_head;
+        MallocMetadata* prev = nullptr;
+        while (tmp != nullptr && tmp->size < meta->size)
+        {
+            prev = tmp;
+            tmp = tmp->free_next;
+        }
+        while(tmp != nullptr && tmp->size == meta->size && tmp->p < meta->p)
+        {
+            prev = tmp;
+            tmp = tmp->free_next;
+        }
+        meta->free_prev = prev;
+        if (prev != nullptr)
+        {
+            prev->free_next = meta;
+        }
+        else
+        {
+            this->free_list_head = meta;
+        }
+        meta->free_next = tmp;
+        if (tmp != nullptr)
+        {
+            tmp->free_prev = meta;
+        }
     }
     size_t getAllocBytes()
     {
@@ -227,7 +332,7 @@ size_t _num_allocated_bytes()
 size_t _size_meta_data()
 {
     //Returns the number of bytes of a single meta-data structure in your system.
-    return sizeof(MallocMetadata) -8;
+    return sizeof(MallocMetadata);
 }
 
 size_t _num_meta_data_bytes()
@@ -236,11 +341,27 @@ size_t _num_meta_data_bytes()
     return m_list.getAllocBlocks() * _size_meta_data();
 }
 
+size_t align (size_t& size)
+{
+    if (size % 8 == 0)
+    {
+        return size;
+    }
+    size_t bigger = 8*((size / 8) + 1);
+    size_t smaller = 8*(size / 8);
+    return (size - smaller < bigger - size ) ? smaller : bigger; 
+}
+
 void* allocateBlock(size_t size)
 {
     if (size == 0 || size > 1e8 )
     {
         return nullptr;
+    }
+    size = align(size);
+    if (size >= 128*1024)
+    {
+
     }
     MallocList& m_list = MallocList::getInstance();
     void* result = m_list.findFreeBlock(size);
@@ -248,23 +369,16 @@ void* allocateBlock(size_t size)
     {
         return result;
     }
-    void * p = sbrk(size);
-    if (p == (void*)(-1))
-    {
-        return nullptr;
-    }
-    result = sbrk(sizeof(MallocMetadata));
-    if (result == (void*)(-1))
+    result = Sbrk(size + sizeof(MallocMetadata));
+    if (result == nullptr)
     {
         return nullptr;
     }
     MallocMetadata* meta_data = (MallocMetadata*)result;
-    meta_data->next = nullptr;
-    meta_data->prev = nullptr;
-    meta_data->is_free = false;
+    m_list.updateNewBlock(meta_data);
     meta_data->size = size;
-    meta_data->p = p;
-    m_list.insertNewBlock(meta_data);
+    meta_data->p = (void*)(result + sizeof(MallocMetadata));
+    m_list.insertNewAllocatedBlock(meta_data);
     return meta_data;
 }
 
