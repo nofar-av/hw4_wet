@@ -89,16 +89,8 @@ public:
         {
             return nullptr;
         }
-        MallocMetadata* tmp = this->list_head;
-        while (tmp != nullptr && tmp->p != p)
-        {
-            tmp = tmp->next;
-        }
-        if (tmp == nullptr || tmp->is_free)
-        {
-            return nullptr;
-        }
-        return tmp;
+        MallocMetadata* md = (MallocMetadata*)(p - sizeof(MallocMetadata*));
+        return md;
     }
     void freeBlock (void * p)
     {
