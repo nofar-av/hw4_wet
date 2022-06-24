@@ -6,7 +6,7 @@
 
 void* Sbrk(size_t size)
 {
-    void* p = Sbrk(size);
+    void* p = sbrk(size);
     if (p == (void*)(-1))
     {
         return nullptr;
@@ -80,39 +80,40 @@ public:
     MallocMetadata* split(MallocMetadata* old_md, size_t size)
     {
         old_md->size = old_md->size - size - sizeof(MallocMetadata);
-        MallocMetadata* new_md = (MallocMetadata*)(old_md->p + old_md->size);
-        new_md->size = size;
-        new_md->is_free = false;
-        new_md->lower = old_md;
-        new_md->higher = old_md->higher;
-        new_md->p = old_md->p + old_md->size + sizeof(MallocMetadata);
-        old_md->higher = new_md;
+        MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + old_md->size);
+        new_free_md->size = size;
+        new_free_md->is_free = false;
+        new_free_md->lower = old_md;
+        new_free_md->higher = old_md->higher;
+        new_free_md->p = old_md->p + old_md->size + sizeof(MallocMetadata);
+        old_md->higher = new_free_md;
         old_md->is_free = true;
+        this->alloc_blocks++;
+        this->alloc_bytes -= sizeof(MallocMetadata);
         this->free_blocks++;
         this->free_bytes += old_md->size;
-        this->insertFreeBlock(new_md); //inserting new free block
+        this->insertFreeBlock(old_md); //inserting new free block
         if (old_md->higher != nullptr)
         {
-            old_md->higher->lower = new_md;
+            old_md->higher->lower = new_free_md;
         }
-        return old_md; //newly allocated block
+        return new_free_md; //newly allocated block
     }
     MallocMetadata* mergeAdjBlocks (MallocMetadata* low, MallocMetadata* high, bool is_free)
     {
         this->free_blocks--;
         this->alloc_blocks--;
-        if (is_free)
-        {
-            this->free_bytes += sizeof(MallocMetadata);
-        }
         this->alloc_bytes += sizeof(MallocMetadata);
         low->size += high->size + sizeof(MallocMetadata);
         low->higher = high->higher;
         if (!is_free)
-        {
+        {   
+            this->free_bytes -= (low->size- sizeof(MallocMetadata));
             low->is_free = false;
             return low;
         }
+        //is_free:
+        this->free_bytes += sizeof(MallocMetadata);
         if (this->alloc_blocks == 1)
         {
             low->free_next = low->free_prev = nullptr;
@@ -263,6 +264,11 @@ public:
         MallocMetadata* merged = md;
         if (md->lower != nullptr && md->lower->is_free) //mrege with lower
         {
+            if (this->free_list_head == md->lower)
+            {
+                this->free_list_head = md->lower->free_next;
+            }
+            this->free_bytes += md->size;
             merged = this->mergeAdjBlocks(md->lower, md, false);
             if (merged->size >= size)
             {
@@ -271,6 +277,11 @@ public:
         }
         if (merged->higher != nullptr && merged->higher->is_free) //merge with higher
         {
+            if (this->free_list_head == merged->higher)
+            {
+                this->free_list_head = merged->higher->free_next;
+            }
+            this->free_bytes += md->size;
             merged = this->mergeAdjBlocks(merged, merged->higher, false);
         }
         if (merged->size >= size)
@@ -312,6 +323,7 @@ public:
         void* p = mmap(nullptr, size + sizeof(MallocMetadata), PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
         if (p == (void*)(-1))
         {
+            std::cout<<"mmap failed"<<std::endl;
             return nullptr;
         }
         MallocMetadata* new_md = (MallocMetadata*)p;
@@ -334,6 +346,11 @@ public:
             //if there is no other free block return (if free) wilderness that is smaller than size
             if (this->wilderness != nullptr && this->wilderness->is_free)
             {
+                if (this->free_list_head == this->wilderness)
+                {
+                    this->free_list_head = nullptr;
+                }
+                size_t old_size = this->wilderness->size;
                 MallocMetadata* meta_ret = unionWilderness(size);
                 if (meta_ret == nullptr)
                 {//sbrk failed
@@ -341,12 +358,13 @@ public:
                 }
                 this->updateBusyBlock(this->wilderness); //updates free, free next & prev
                 this->free_blocks --;
-                this->free_bytes -= this->wilderness->size;
+                this->free_bytes -= old_size;
                 return meta_ret;
             }
             else 
             {
                 //allocate a new block if there is no free block available
+                
                 void* p = Sbrk(size + sizeof(MallocMetadata));
                 if (p == nullptr)
                 {
@@ -362,6 +380,10 @@ public:
         }
         else
         {
+            if (this->free_list_head == tmp)
+            {
+                this->free_list_head = tmp->free_next;
+            }
             //there is a block that is big enough
             this->updateBusyBlock(tmp); //updates free, free next & prev
             this->free_blocks --;
@@ -419,12 +441,12 @@ public:
         this->free_blocks ++;
         this->free_bytes += md->size;
         bool is_merged = false;
-        if (md->higher->is_free)
+        if (md->higher != nullptr && md->higher->is_free)
         {
             is_merged = true;
             this->mergeAdjBlocks(md, md->higher, true);
         }
-        if (md->lower->is_free)
+        if (md->lower != nullptr && md->lower->is_free)
         {
             is_merged = true;
             this->mergeAdjBlocks(md->lower, md, true);
@@ -594,27 +616,3 @@ void* srealloc(void* oldp, size_t size)
     }
     return result;
 }
-
-/*else
-        {
-            MallocMetadata* tmp = this->free_list_head;
-            while (tmp->next != nullptr && tmp->size < meta_data->size)
-            {
-                tmp = tmp->next;
-            }
-            while (tmp->next != nullptr && tmp->size == meta_data->size && 
-                    tmp->p < meta_data->p)
-            {
-                tmp = tmp->next;
-            }
-            if (tmp->p == meta_data->p)
-            {//TODO:: shouldn't happen
-                return;
-            }
-            tmp->next = meta_data;
-            meta_data->prev = tmp;
-            this->wilderness->higher = meta_data;
-            meta_data->lower = this->wilderness;// TODO::
-            // metadata free_prev = wilderness or wilderness->free_prev
-            this->wilderness = meta_data;
-        }*/
