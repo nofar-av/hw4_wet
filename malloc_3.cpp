@@ -31,10 +31,11 @@ class MallocList {
     size_t free_bytes;
     size_t alloc_bytes; //free & used
     MallocMetadata* free_list_head;//  free list
-    MallocMetadata* wilderness;// end of all blocks list
+    
     MallocMetadata* mmaped_list_head;
      
 public:
+    MallocMetadata* wilderness;// end of all blocks list
     MallocList()
     {
         this->free_blocks = 0;
@@ -81,6 +82,10 @@ public:
     {
         old_md->size = old_md->size - size - sizeof(MallocMetadata);
         MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + old_md->size);
+        if (this->wilderness == old_md)
+        {
+            this->wilderness = new_free_md;
+        }
         new_free_md->size = size;
         new_free_md->is_free = false;
         new_free_md->lower = old_md;
@@ -97,7 +102,7 @@ public:
         {
             old_md->higher->lower = new_free_md;
         }
-        return new_free_md; //newly allocated block
+        return old_md; //newly allocated block
     }
     MallocMetadata* mergeAdjBlocks (MallocMetadata* low, MallocMetadata* high, bool is_free)
     {
@@ -106,6 +111,10 @@ public:
         this->alloc_bytes += sizeof(MallocMetadata);
         low->size += high->size + sizeof(MallocMetadata);
         low->higher = high->higher;
+        if (this->wilderness == high)
+        {
+            this->wilderness = low;
+        }
         if (!is_free)
         {   
             this->free_bytes -= (low->size- sizeof(MallocMetadata));
@@ -512,6 +521,15 @@ size_t _num_free_blocks()
   return m_list.getFreeBlocks();
 }
 
+void _print_all_blocks()
+{
+    MallocList& m_list = MallocList::getInstance();
+    MallocMetadata* tmp = m_list.wilderness;
+    while(tmp != nullptr)
+    {
+        tmp = tmp->lower;
+    }
+}
 size_t _num_free_bytes()
 {
     MallocList& m_list = MallocList::getInstance();
@@ -605,7 +623,7 @@ void* srealloc(void* oldp, size_t size)
     }
     MallocList& m_list = MallocList::getInstance();
     MallocMetadata* old_meta_data = m_list.getBlock(oldp);
-    void* result = nullptr;
+    MallocMetadata* result = nullptr;
     if (size  >= 128*1024)
     {
         result = m_list.reallocateBigBlock(old_meta_data, size);
@@ -614,5 +632,5 @@ void* srealloc(void* oldp, size_t size)
     {
         result = m_list.reallocateBlock(old_meta_data, size);
     }
-    return result;
+    return result->p;
 }
