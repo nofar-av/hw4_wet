@@ -79,37 +79,8 @@ public:
         return instance;
     }
     MallocMetadata* split(MallocMetadata* old_md, size_t size)
-    {
-        /*old_md->size = old_md->size - size - sizeof(MallocMetadata);
-        MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + old_md->size);
-        if (this->wilderness == old_md)
-        {
-            this->wilderness = new_free_md;
-        }
-        new_free_md->size = size;
-        new_free_md->is_free = false;
-        new_free_md->lower = old_md;
-        new_free_md->higher = old_md->higher;
-        new_free_md->p = old_md->p + old_md->size + sizeof(MallocMetadata);
-        old_md->higher = new_free_md;
-        old_md->is_free = true;
-        this->alloc_blocks++;
-        this->alloc_bytes -= sizeof(MallocMetadata);
-        this->free_blocks++;
-        this->free_bytes += old_md->size;
-        this->insertFreeBlock(old_md); //inserting new free block to free list
-        if (old_md->higher != nullptr)
-        {
-            old_md->higher->lower = new_free_md;
-        }
-        return old_md; //newly allocated block*/
-        
-
+    {       
         MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + size);
-        if (this->wilderness == old_md)
-        {
-            this->wilderness = new_free_md;
-        }
         new_free_md->size = old_md->size - size - sizeof(MallocMetadata);
         new_free_md->is_free = true;
         new_free_md->lower = old_md;
@@ -118,6 +89,10 @@ public:
         if (old_md->higher != nullptr)
         {
             old_md->higher->lower = new_free_md;
+        }
+        else
+        {
+            this->wilderness = new_free_md;
         }
         old_md->higher = new_free_md;
         old_md->is_free = false;
@@ -424,7 +399,7 @@ public:
             this->updateBusyBlock(tmp); //updates free, free next & prev
             this->free_blocks --;
             this->free_bytes -= tmp->size;
-            if (tmp->size >= 128 +  sizeof(MallocMetadata) + size)//was: if (tmp->size >= 128 +  sizeof(MallocMetadata)) 
+            if (tmp->size >= 128 +  sizeof(MallocMetadata) + size)
             {
                 return split(tmp, size);
             }
@@ -515,7 +490,6 @@ public:
         else
         {
             this->free_list_head = meta;
-            return;
         }
         meta->free_next = tmp;
         if (tmp != nullptr)
@@ -609,8 +583,7 @@ MallocMetadata* allocateBlock(size_t size)
         MallocMetadata* new_md = m_list.allocateBigBlock(size);
         return new_md;
     }
-    MallocMetadata* result = m_list.findFreeBlock(size);
-    return result;
+    return m_list.findFreeBlock(size);
 }
 
 void* smalloc(size_t size)
@@ -625,12 +598,11 @@ void* smalloc(size_t size)
 
 void* scalloc(size_t num, size_t size)
 {
-    void* result = allocateBlock(size*num);
+    MallocMetadata* result = allocateBlock(size*num);
     if (result == nullptr)
     {
         return nullptr;
     }
-    MallocMetadata* meta_data = (MallocMetadata*)result;
     memset(meta_data->p, 0, size);
     return meta_data->p;
 }
