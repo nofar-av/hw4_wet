@@ -603,8 +603,8 @@ void* scalloc(size_t num, size_t size)
     {
         return nullptr;
     }
-    memset(meta_data->p, 0, size);
-    return meta_data->p;
+    memset(result->p, 0, size);
+    return result->p;
 }
 
 void sfree(void* p)
