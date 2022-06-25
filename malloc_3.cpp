@@ -329,7 +329,7 @@ public:
     
     MallocMetadata* allocateBigBlock(size_t size)
     {
-        void* p = mmap(nullptr, size + sizeof(MallocMetadata), PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+        void* p = mmap(nullptr, size + sizeof(MallocMetadata), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (p == (void*)(-1))
         {
             std::cout<<"mmap failed"<<std::endl;
