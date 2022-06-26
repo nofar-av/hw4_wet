@@ -89,7 +89,7 @@ public:
         {
             return nullptr;
         }
-        MallocMetadata* md = (MallocMetadata*)(p - sizeof(MallocMetadata*));
+        MallocMetadata* md = (MallocMetadata*)(p - sizeof(MallocMetadata));
         return md;
     }
     void freeBlock (void * p)
