@@ -82,7 +82,6 @@ public:
     {       
         MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + size);
         new_free_md->size = old_md->size - size - sizeof(MallocMetadata);
-        new_free_md->is_free = true;
         new_free_md->lower = old_md;
         new_free_md->higher = old_md->higher;
         new_free_md->p = old_md->p + size + sizeof(MallocMetadata);
@@ -99,9 +98,7 @@ public:
         old_md->size = size;
         this->alloc_blocks++;
         this->alloc_bytes -= sizeof(MallocMetadata);
-        this->free_blocks++;
-        this->free_bytes += new_free_md->size;
-        this->insertFreeBlock(new_free_md); //inserting new free block to free list
+        this->freeBlock(new_free_md->p); //inserting new free block to free list
         
         return old_md; //newly allocated block
     }
@@ -268,6 +265,7 @@ public:
         }
         if (md->size >= size)
         {
+            md->size = size;
             return md;
         }
         size_t oldsize = md->size;
@@ -603,7 +601,7 @@ void* scalloc(size_t num, size_t size)
     {
         return nullptr;
     }
-    memset(result->p, 0, size);
+    memset(result->p, 0, size*num);
     return result->p;
 }
 
