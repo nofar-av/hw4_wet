@@ -80,11 +80,11 @@ public:
     }
     MallocMetadata* split(MallocMetadata* old_md, size_t size)
     {       
-        MallocMetadata* new_free_md = (MallocMetadata*)(old_md->p + size);
+        MallocMetadata* new_free_md = (MallocMetadata*)((uint8_t*)old_md->p + size);
         new_free_md->size = old_md->size - size - sizeof(MallocMetadata);
         new_free_md->lower = old_md;
         new_free_md->higher = old_md->higher;
-        new_free_md->p = old_md->p + size + sizeof(MallocMetadata);
+        new_free_md->p = (uint8_t*)old_md->p + size + sizeof(MallocMetadata);
         if (old_md->higher != nullptr)
         {
             old_md->higher->lower = new_free_md;
@@ -115,7 +115,7 @@ public:
         }
         if (!is_free)
         {   
-            this->free_bytes -= (low->size- sizeof(MallocMetadata));
+            this->free_bytes -= (low->size - sizeof(MallocMetadata));
             low->is_free = false;
             return low;
         }
@@ -228,7 +228,7 @@ public:
         }
         else
         {
-            MallocMetadata* tmp = this->wilderness;
+            //MallocMetadata* tmp = this->wilderness;
             this->wilderness->higher = meta_data;
             meta_data->lower = this->wilderness;
             //meta_data->free_prev = (this->wilderness->is_free) ? 
@@ -290,7 +290,7 @@ public:
             {
                 this->free_list_head = merged->higher->free_next;
             }
-            this->free_bytes += md->size;
+            this->free_bytes += merged->size;
             merged = this->mergeAdjBlocks(merged, merged->higher, false);
         }
         if (merged->size >= size)
@@ -382,7 +382,7 @@ public:
                 MallocMetadata* meta_data = (MallocMetadata*)p;
                 this->updateNewBlock(meta_data);
                 meta_data->size = size;
-                meta_data->p = (void*)(p + sizeof(MallocMetadata));
+                meta_data->p = (void*)((uint8_t*)p + sizeof(MallocMetadata));
                 this->insertNewAllocatedBlock(meta_data);
                 return meta_data;
             }
@@ -411,7 +411,7 @@ public:
         {
             return nullptr;
         }
-        MallocMetadata* md = (MallocMetadata*)(p - sizeof(MallocMetadata));
+        MallocMetadata* md = (MallocMetadata*)((uint8_t*)p - sizeof(MallocMetadata));
         return md;
     }
 
@@ -440,7 +440,7 @@ public:
         {
             return ;
         }
-        MallocMetadata* md = (MallocMetadata*)(p - sizeof(MallocMetadata)); 
+        MallocMetadata* md = (MallocMetadata*)((uint8_t*)p - sizeof(MallocMetadata)); 
         if (md->size >= 128*1024)
         {
             this->freeBigBlock(md);
