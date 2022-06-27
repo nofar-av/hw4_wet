@@ -109,6 +109,14 @@ public:
         this->alloc_bytes += sizeof(MallocMetadata);
         low->size += high->size + sizeof(MallocMetadata);
         low->higher = high->higher;
+        if(high->higher != nullptr)
+        {
+            (high->higher)->lower = low;
+        }
+        if(low->lower != nullptr)
+        {
+            (low->lower)->higher = low;
+        }
         if (this->wilderness == high)
         {
             this->wilderness = low;
@@ -120,10 +128,15 @@ public:
             return low;
         }
         //is_free:
+        if(high == this->free_list_head)
+        {
+            this->free_list_head = low;
+        }
         this->free_bytes += sizeof(MallocMetadata);
         if (this->alloc_blocks == 1)
         {
-            low->free_next = low->free_prev = nullptr;
+            low->free_next = nullptr;
+            low->free_prev = nullptr;
             return low;
         }
         if (low->free_next == nullptr && low->free_prev == nullptr)
